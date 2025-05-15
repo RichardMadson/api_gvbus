@@ -11,7 +11,7 @@ app.use(express.json());
 const apiKeyAuth = (req, res, next) => {
   const apiKey = req.headers['x-api-key'];
   // Defina sua chave de API segura aqui (idealmente via variável de ambiente)
-  const SERVER_API_KEY = process.env.SCRAPER_API_KEY; 
+  const SERVER_API_KEY = process.env.SCRAPER_API_KEY || 'K@ggS@24O4]G]yPa-mPTq^Hds7WG!OF'; 
 
   if (apiKey && apiKey === SERVER_API_KEY) {
     next();
