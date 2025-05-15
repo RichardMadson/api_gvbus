@@ -9,11 +9,12 @@ app.use(express.json());
 
 // Middleware simples para autenticação com X-API-Key
 const apiKeyAuth = (req, res, next) => {
-  const apiKey = req.headers['x-api-key'];
-  // Defina sua chave de API segura aqui (idealmente via variável de ambiente)
-  const SERVER_API_KEY = 'TESTE123'; // Chave de teste simples
-  console.log(`[DEBUG] Chave esperada pelo servidor: ${SERVER_API_KEY}`); // Adicione este log; 
-
+const apiKey = req.headers['x-api-key'];
+const SERVER_API_KEY = process.env.SCRAPER_API_KEY; // Ou a forma como você definiu acima
+  if (!SERVER_API_KEY) {
+    console.error("[Server.js] ERRO CRÍTICO: SCRAPER_API_KEY não está definida no ambiente do servidor.");
+    return res.status(500).json({ error: 'Erro de configuração interna do servidor.' });
+  }
   if (apiKey && apiKey === SERVER_API_KEY) {
     next();
   } else {
