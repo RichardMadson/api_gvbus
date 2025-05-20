@@ -129,14 +129,14 @@ async function scrapTransportCardsV1(username, password) {
 
     // 7) Marcar "Exibir detalhes"
     console.log("[Scraper.js] [V1] ➡️ 7) Clicando em Exibir detalhes");
-    await page.waitForSelector("label[for=\"chkGrid\"]", { timeout: 30000 });
+    await page.waitForSelector("label[for=\"chkGrid\"]", { timeout: 15000 });
     await page.click("label[for=\"chkGrid\"]");
     console.log("[Scraper.js] [V1] ✅ Exibir detalhes marcado");
 
     // 8) Esperar pela tabela - TIMEOUT REDUZIDO PARA FALHAR MAIS RÁPIDO SE NECESSÁRIO
     console.log("[Scraper.js] [V1] ➡️ 8) Aguardando tabela de funcionários");
     // Reduzimos o timeout para 30 segundos para falhar mais rápido se necessário
-    await page.waitForSelector("table#gridPedidos tbody tr", { timeout: 30000 });
+    await page.waitForSelector("table#gridPedidos tbody tr", { timeout: 12000 });
     console.log("[Scraper.js] [V1] ✅ Tabela carregada");
 
     // 9) Extrair dados
