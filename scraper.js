@@ -29,24 +29,19 @@ async function bloquearRecursos(page) {
     const url = route.request().url();
     const tipo = route.request().resourceType();
     if (['image', 'media', 'font', 'stylesheet'].includes(tipo) || url.match(/\.(png|jpg|jpeg|gif|svg|webp|css|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|ico)$/i)) {
-      //console.log(`[Bloqueado] ${tipo} => ${url}`);
       return route.abort();
     }
     if (url.endsWith('.js') || url.includes('WebResource.axd') || url.includes('ScriptResource.axd')) {
       for (const jsName of allowJs) {
         if (url.includes(jsName)) {
-          //console.log(`[Permitido] JS essencial => ${url}`);
           return route.continue();
         }
       }
-      //console.log(`[Bloqueado] JS NÃO essencial => ${url}`);
       return route.abort();
     }
     if (!url.startsWith('https://recargaonline.gvbus.org.br/')) {
-      //console.log(`[Bloqueado] Request externo => ${url}`);
       return route.abort();
     }
-    //console.log(`[Permitido] ${tipo} => ${url}`);
     return route.continue();
   });
 }
@@ -82,6 +77,38 @@ function filtrarDepartamentos(departamentos) {
   return filtrados;
 }
 
+// NOVA FUNÇÃO: Encontrar opção "Todos" no dropdown
+function encontrarOpcaoTodos(departamentos) {
+  const todos = departamentos.find(dep => {
+    const label = (dep.label || "").toLowerCase();
+    return label === "todos" || dep.value === "0" || dep.value === "-1";
+  });
+  console.log(`[Todos] Opção encontrada:`, todos);
+  return todos;
+}
+
+// NOVA FUNÇÃO: Comparar cartões e remover duplicatas
+function compararERemoverDuplicatas(cartoesDepartamentos, cartoesTodos) {
+  console.log(`[Comparação] Cartões dos departamentos: ${cartoesDepartamentos.length}`);
+  console.log(`[Comparação] Cartões de "Todos": ${cartoesTodos.length}`);
+
+  // Criar Set com números dos cartões dos departamentos para busca rápida
+  const cartoesDepSet = new Set(cartoesDepartamentos.map(c => c.cardNumber));
+
+  // Filtrar cartões de "Todos" que NÃO estão nos departamentos
+  const cartoesExtras = cartoesTodos.filter(cartao => !cartoesDepSet.has(cartao.cardNumber));
+
+  console.log(`[Comparação] Cartões extras encontrados em "Todos": ${cartoesExtras.length}`);
+  if (cartoesExtras.length > 0) {
+    console.log(`[Comparação] Cartões extras:`, cartoesExtras.map(c => `${c.cardNumber} - ${c.employeeName}`));
+  }
+
+  // Combinar todos os cartões
+  const todosCartoes = [...cartoesDepartamentos, ...cartoesExtras];
+  console.log(`[Comparação] Total final de cartões: ${todosCartoes.length}`);
+
+  return todosCartoes;
+}
 
 async function aguardarAtualizacaoTabela(page, ultimoPrimeiroCartao) {
   console.log("[Aguardar] Esperando atualização da tabela...");
@@ -163,7 +190,7 @@ async function processarDepartamento(page, dep, detalhesExibidosRef) {
     // Aguarda o innerHTML da tabela mudar
     let mudouTabela = false;
     let tentativas = 0;
-    while (!mudouTabela && tentativas < 12) { // até 12 tentativas (~10s total)
+    while (!mudouTabela && tentativas < 12) {
       await page.waitForTimeout(850);
       let tabelaAtual = "";
       try {
@@ -172,7 +199,7 @@ async function processarDepartamento(page, dep, detalhesExibidosRef) {
         tabelaAtual = null;
       }
       if (tabelaAnterior === null || tabelaAtual === null) {
-        mudouTabela = true; // Não conseguimos comparar, segue assim mesmo
+        mudouTabela = true;
       } else if (tabelaAtual !== tabelaAnterior) {
         mudouTabela = true;
       }
@@ -205,21 +232,19 @@ async function processarDepartamento(page, dep, detalhesExibidosRef) {
       await withRetry(() => page.waitForSelector('label[for="chkGrid"]', { timeout: 7000 }), 2, 1000, "Exibir detalhes");
       await marcarSeNaoMarcado(page, "#chkGrid");
       detalhesExibidosRef.value = true;
-      // Espera recarregar se clicar no "Exibir detalhes"
-      await page.waitForTimeout(850); // só uma pequena pausa
+      await page.waitForTimeout(850);
     }
 
-    // Extração segura dos 3 primeiros cartões para confirmação
-    tentativas = 0;
+    // Extração segura dos cartões
+    let tentativasExtracao = 0;
     let cartoes = [];
     while (tentativas < 3) {
       cartoes = await extrairCartoesDaTabela(page, dep.label);
-      // Confirma se extração realmente é do departamento esperado e dos 3 primeiros
       const dropdownValue = await page.$eval('#DropDownDepartamento', el => el.value);
       if (dropdownValue === dep.value && cartoes.length > 0) {
         let cartoesOk = true;
         for (const c of cartoes) {
-          if (c.departamento !== dep.label) {
+          if (c.department !== dep.label) {
             cartoesOk = false;
             console.warn(`[Processar] Cartão extraído de outro departamento: ${JSON.stringify(c)}`);
             break;
@@ -242,6 +267,34 @@ async function processarDepartamento(page, dep, detalhesExibidosRef) {
   }
 }
 
+// NOVA FUNÇÃO: Extrair cartões de "Todos"
+async function extrairCartoesTodos(page, opcaoTodos) {
+  console.log(`[Todos] Iniciando extração de cartões de "Todos"...`);
+
+  try {
+    // Seleciona a opção "Todos"
+    console.log(`[Todos] Selecionando opção "Todos" (${opcaoTodos.value})...`);
+    await page.selectOption('#DropDownDepartamento', opcaoTodos.value);
+
+    // Aguarda a tabela atualizar
+    await page.waitForTimeout(1500);
+
+    // Garante que os detalhes estão exibidos
+    await withRetry(() => page.waitForSelector('label[for="chkGrid"]', { timeout: 7000 }), 2, 1000, "Exibir detalhes para Todos");
+    await marcarSeNaoMarcado(page, "#chkGrid");
+    await page.waitForTimeout(850);
+
+    // Extrai os cartões
+    const cartoes = await extrairCartoesDaTabela(page, "Todos");
+    console.log(`[Todos] Cartões extraídos de "Todos": ${cartoes.length}`);
+
+    return cartoes;
+  } catch (err) {
+    console.error(`[Todos] Erro ao extrair cartões de "Todos":`, err);
+    return [];
+  }
+}
+
 async function scrapTransportCards(username, password) {
   console.log(`[Scraper.js] 🔰 Iniciando automação otimizada para usuário: ${username}`);
   return await scrapTransportCardsV1(username, password);
@@ -251,7 +304,7 @@ async function scrapTransportCardsV1(username, password) {
   const LOGIN_URL = "https://recargaonline.gvbus.org.br/frmLogin.aspx";
   const PEDIDO_URL = "https://recargaonline.gvbus.org.br/frmPedidoCargaIndividual.aspx?TituloMenu=Novo+pedido+de+carga&NumDias=0&InserePedido=s&FatorAnterior=0&ChaveGrupo=&ValorCarga=0&CodPedidoCopy=0&CodAnoCopy=";
   const TIMEOUT = 30000;
-  const MAX_PARALLEL = 2; // máximo de abas paralelas
+  const MAX_PARALLEL = 2;
 
   const tAll = tempo("Execução V1");
   let browser, mainPage;
@@ -337,81 +390,101 @@ async function scrapTransportCardsV1(username, password) {
     console.log(`[Departamentos] Encontrados: ${departamentos.length}`);
 
     const departamentosValidos = filtrarDepartamentos(departamentos);
+    const opcaoTodos = encontrarOpcaoTodos(departamentos);
+
+    let cartoesDepartamentos = [];
+    let cartoesTodos = [];
     let todosCartoes = [];
-    if (departamentosValidos.length > 1) {
-      // Paralelismo em até 2 abas
-      console.log(`[Departamentos] Usando paralelismo de até ${MAX_PARALLEL} abas`);
-      const chunks = [];
-      for (let i = 0; i < departamentosValidos.length; i += MAX_PARALLEL) {
-        chunks.push(departamentosValidos.slice(i, i + MAX_PARALLEL));
-      }
-      for (const chunk of chunks) {
-        // Cria uma página por departamento no chunk
-        const pages = await Promise.all(chunk.map(async () => {
-          const page = await browser.newPage();
-          await bloquearRecursos(page);
-          return page;
-        }));
 
-        // Todas páginas fazem login e navegam até tela
-        await Promise.all(pages.map(async (page, idx) => {
-          try {
-            await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: TIMEOUT });
-            const lgpdCheckbox = await page.$("#Toolbar_modalTermoAceiteLGPD input[type=checkbox]");
-            if (lgpdCheckbox) {
-              await page.click("#Toolbar_modalTermoAceiteLGPD input[type=checkbox]");
-              await page.waitForSelector("#Toolbar_modalTermoAceiteLGPD", { state: "hidden", timeout: 7000 });
+    // NOVA LÓGICA: Sempre extrair de departamentos E de "Todos" para comparar
+    if (departamentosValidos.length > 0) {
+      console.log(`[Estratégia] Extraindo de ${departamentosValidos.length} departamentos + "Todos" para comparação`);
+
+      // 1. EXTRAIR DOS DEPARTAMENTOS (usando paralelismo se necessário)
+      if (departamentosValidos.length > 1) {
+        console.log(`[Departamentos] Usando paralelismo de até ${MAX_PARALLEL} abas`);
+        const chunks = [];
+        for (let i = 0; i < departamentosValidos.length; i += MAX_PARALLEL) {
+          chunks.push(departamentosValidos.slice(i, i + MAX_PARALLEL));
+        }
+        for (const chunk of chunks) {
+          const pages = await Promise.all(chunk.map(async () => {
+            const page = await browser.newPage();
+            await bloquearRecursos(page);
+            return page;
+          }));
+
+          await Promise.all(pages.map(async (page, idx) => {
+            try {
+              await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: TIMEOUT });
+              const lgpdCheckbox = await page.$("#Toolbar_modalTermoAceiteLGPD input[type=checkbox]");
+              if (lgpdCheckbox) {
+                await page.click("#Toolbar_modalTermoAceiteLGPD input[type=checkbox]");
+                await page.waitForSelector("#Toolbar_modalTermoAceiteLGPD", { state: "hidden", timeout: 7000 });
+              }
+              const btnCookies = await page.$("#modalPoliticaCookies input.button");
+              if (btnCookies) {
+                await btnCookies.click();
+                await page.waitForSelector("#modalPoliticaCookies", { state: "hidden", timeout: 7000 });
+              }
+              await page.waitForSelector("#txtEmailTitular", { timeout: TIMEOUT });
+              await page.fill("#txtEmailTitular", username);
+              await page.waitForSelector("#txtSenha", { timeout: TIMEOUT });
+              await page.fill("#txtSenha", password);
+              await Promise.all([
+                page.click("#btnLogin"),
+                page.waitForLoadState("networkidle", { timeout: TIMEOUT })
+              ]);
+              await page.goto(PEDIDO_URL, { waitUntil: "networkidle", timeout: TIMEOUT });
+              console.log(`[Parallel Login] Página do departamento ${chunk[idx].label} pronta`);
+            } catch (e) {
+              console.error(`[Parallel Login] Erro no login paralelo para departamento ${chunk[idx].label}:`, e.stack);
+              throw e;
             }
-            const btnCookies = await page.$("#modalPoliticaCookies input.button");
-            if (btnCookies) {
-              await btnCookies.click();
-              await page.waitForSelector("#modalPoliticaCookies", { state: "hidden", timeout: 7000 });
-            }
-            await page.waitForSelector("#txtEmailTitular", { timeout: TIMEOUT });
-            await page.fill("#txtEmailTitular", username);
-            await page.waitForSelector("#txtSenha", { timeout: TIMEOUT });
-            await page.fill("#txtSenha", password);
-            await Promise.all([
-              page.click("#btnLogin"),
-              page.waitForLoadState("networkidle", { timeout: TIMEOUT })
-            ]);
-            await page.goto(PEDIDO_URL, { waitUntil: "networkidle", timeout: TIMEOUT });
-            console.log(`[Parallel Login] Página do departamento ${chunk[idx].label} pronta`);
-          } catch (e) {
-            console.error(`[Parallel Login] Erro no login paralelo para departamento ${chunk[idx].label}:`, e.stack);
-            throw e;
-          }
-        }));
+          }));
 
-        // Extrai de cada página em paralelo
-        const resultadosChunk = await Promise.all(chunk.map(async (dep, idx) => {
-          const page = pages[idx];
-          let detalhesExibidosRef = { value: false };
-          const dados = await processarDepartamento(page, dep, detalhesExibidosRef);
-          await page.close();
-          return dados;
-        }));
+          const resultadosChunk = await Promise.all(chunk.map(async (dep, idx) => {
+            const page = pages[idx];
+            let detalhesExibidosRef = { value: false };
+            const dados = await processarDepartamento(page, dep, detalhesExibidosRef);
+            await page.close();
+            return dados;
+          }));
 
-        todosCartoes = todosCartoes.concat(...resultadosChunk);
-      }
-    } else {
-      // 0 ou 1 departamento, faz normal na mainPage
-      let detalhesExibidosRef = { value: false };
-      if (departamentosValidos.length === 1) {
-        todosCartoes = await processarDepartamento(mainPage, departamentosValidos[0], detalhesExibidosRef);
+          cartoesDepartamentos = cartoesDepartamentos.concat(...resultadosChunk);
+        }
       } else {
-        // Sem departamentos personalizados
-        await withRetry(() => mainPage.waitForSelector("label[for=\"chkGrid\"]", { timeout: 7000 }), 2, 1000, "Exibir detalhes");
-        await marcarSeNaoMarcado(mainPage, "#chkGrid");
-        await aguardarAtualizacaoTabela(mainPage, await mainPage.$$eval('table#gridPedidos tbody tr', trs => trs.length));
-        todosCartoes = await extrairCartoesDaTabela(mainPage, "Todos");
+        // Apenas 1 departamento, usar mainPage
+        let detalhesExibidosRef = { value: false };
+        cartoesDepartamentos = await processarDepartamento(mainPage, departamentosValidos[0], detalhesExibidosRef);
       }
+
+      // 2. EXTRAIR DE "TODOS" (sempre fazer isso quando há departamentos)
+      if (opcaoTodos) {
+        console.log(`[Estratégia] Extraindo cartões de "Todos" para comparação...`);
+        cartoesTodos = await extrairCartoesTodos(mainPage, opcaoTodos);
+      }
+
+      // 3. COMPARAR E COMBINAR
+      todosCartoes = compararERemoverDuplicatas(cartoesDepartamentos, cartoesTodos);
+
+    } else {
+      // Sem departamentos personalizados, extrair apenas de "Todos"
+      console.log(`[Estratégia] Sem departamentos personalizados, extraindo apenas de "Todos"`);
+      await withRetry(() => mainPage.waitForSelector("label[for=\"chkGrid\"]", { timeout: 7000 }), 2, 1000, "Exibir detalhes");
+      await marcarSeNaoMarcado(mainPage, "#chkGrid");
+      await aguardarAtualizacaoTabela(mainPage, await mainPage.$$eval('table#gridPedidos tbody tr', trs => trs.length));
+      todosCartoes = await extrairCartoesDaTabela(mainPage, "Todos");
     }
+
     if (todosCartoes.length === 0) {
       console.warn("[Final] Nenhum cartão foi extraído!");
       throw new Error("Nenhum dado extraído da tabela (V1)");
     }
+
     console.log(`[Final] Total de cartões extraídos: ${todosCartoes.length}`);
+    console.log(`[Final] Resumo: ${cartoesDepartamentos.length} dos departamentos + ${cartoesTodos.length - (cartoesTodos.length - (todosCartoes.length - cartoesDepartamentos.length))} extras de "Todos"`);
+
     return todosCartoes;
   } catch (mainErr) {
     console.error("[ERRO FATAL NO SCRAPER]:", mainErr.stack || mainErr);
