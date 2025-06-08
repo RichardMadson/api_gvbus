@@ -127,7 +127,7 @@ async function extrairCartoesDaTabela(page, departamento) {
           balance = parseFloat(balanceText.replace(/\./g, "").replace(",", "."));
           if (isNaN(balance)) balance = 0;
         }
-        dados.push({ cardNumber, employeeId, employeeName, balance, departamento });
+        dados.push({ cardNumber, employeeId, employeeName, balance, department: departamento });
         count++;
         console.log(`[Log] Cartão extraído (${count}/${rows.length}) do departamento "${departamento}":`, { cardNumber, employeeId, employeeName, balance });
       } catch (rowError) {
