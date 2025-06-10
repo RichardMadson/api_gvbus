@@ -20,11 +20,24 @@ async function loginEGetCookies(username, password) {
   await page.fill('input[name="txtEmailTitular"]', username);
   await page.fill('input[name="txtSenha"]', password);
 
-  // Clica no login
+  // Clica no login e aguarda navegação
   await Promise.all([
     page.click('input[name="btnLogin"]'),
     page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }),
   ]);
+
+  // Verifica erro de login
+  try {
+    await page.waitForSelector('#ValidationSummary1.erro', { timeout: 3000, state: 'visible' });
+    const erroTexto = await page.$eval('#ValidationSummary1.erro', el => el.innerText);
+    await browser.close();
+    throw new Error(`Falha no login: ${erroTexto.trim()}`);
+  } catch (e) {
+    if (!e.message.includes('Timeout')) {
+      await browser.close();
+      throw e;
+    }
+  }
 
   // Captura cookies para usar no axios
   const cookies = await context.cookies();
@@ -32,6 +45,7 @@ async function loginEGetCookies(username, password) {
 
   return cookies.map(c => `${c.name}=${c.value}`).join('; ');
 }
+
 
 async function pegarPaginaInicial(cookieHeader) {
   const url = 'https://recargaonline.gvbus.org.br/frmPedidoCargaIndividual.aspx';
