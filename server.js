@@ -52,13 +52,17 @@ async function processQueue() {
   } catch (error) {
     console.error('[Server.js] Erro durante o scraping:', error);
     let errorMessage = 'Falha ao obter dados dos cartões.';
+    let statusCode = 500;
+
     if (error.message.includes('Falha no login')) {
-        errorMessage = 'Falha no login na operadora. Verifique as credenciais.';
+      errorMessage = 'Falha no login na operadora. Verifique as credenciais.';
+      statusCode = 401;
     }
-    res.status(500).json({ success: false, error: errorMessage, details: error.message });
+
+    res.status(statusCode).json({ success: false, error: errorMessage, details: error.message });
   } finally {
     busy = false;
-    setImmediate(processQueue); // Chama o próximo da fila
+    setImmediate(processQueue);
   }
 }
 
